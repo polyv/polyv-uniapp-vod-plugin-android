@@ -1,16 +1,22 @@
-该插件封装了保利威 Android 与 iOS 原生点播 SDK，集成了保利威常用的基本接口。使用本插件可以轻松把保利威 Android 与 iOS SDK 集成到自己的 app 中，实现保利威视频播放、下载等功能。想要集成本插件，需要在[保利威视频云平台](http://www.polyv.net/)注册账号，并开通相关服务。
+
+
+本项目是针对保利威云点播的uni-app客户提供的打包工程，用于打包 uni-app 项目（包含云点播插件）的自定义基座，也可用于打正式包。使用该项目进行离线打包，可使你免受 uni-app 云打包的限制。支持在该工程的基础上添加其他uni-app插件。
 
 ## 开发环境
 
 uni-app 开发环境：HBuilderX 2.8.0+
 
+Android 开发环境：JDK 1.8+， AndroidStudio 3.0+
+
 ## 前提条件
 
-1. [保利威官网](http://www.polyv.net/)账号
+1. [保利威官网](http://www.polyv.net/)账号，需要在[保利威视频云平台](http://www.polyv.net/)注册账号，并开通相关服务。
+
+
 
 ## 集成打包说明
 
-###通用插件集成云打包
+### 通用插件集成云打包
 
 1. 购买插件，选择该插件绑定的项目。
 2. 在HBuilderX里找到项目，在manifest的app原生插件配置中勾选模块，如需要填写参数则参考插件作者的文档添加。
@@ -18,17 +24,55 @@ uni-app 开发环境：HBuilderX 2.8.0+
 4. 打包[自定义基座](https://ask.dcloud.net.cn/article/35115)，选择插件，得到自定义基座，然后运行时选择自定义基座，进行log输出测试。
 5. 开发完毕后正式云打包
 
-### HBuilderx 本地插件打包集成
 
-Android 原生插件在 HBuilderx 中支持云打包。同时开发者也可以下载插件，以本地插件包的方式，打正式包或者自定义基座。
 
-将下载的插件包复制到前端工程的`nativeplugins`目录下，然后在`manifest.json`文件的【App原生插件配置】项下点击【选择本地插件】，在列表中选择需要打包生效的插件。确定保存后，重新提交云端打包生效。
+## 下载离线 SDK 包
 
-详细配置方式可以参考官方文档：[uni-app原生插件本地配置](https://nativesupport.dcloud.net.cn/NativePlugin/use/use_local_plugin?id=uni-app%e5%8e%9f%e7%94%9f%e6%8f%92%e4%bb%b6%e6%9c%ac%e5%9c%b0%e9%85%8d%e7%bd%ae)。
+本项目基于想正常运行，需先到 uni-app 的官网下载离线 SDK 包 —— [下载链接](https://nativesupport.dcloud.net.cn/AppDocs/download/android)。
+
+⚠️注意，SDK 包的与 HBuilderX 的版本一一对应，请根据你 HBuilderX 的版本下载对应的 SDK 包。本项目基于 v2.8.6 版本的 SDK 进行开发，建议不要使用跟该版本差异太大的版本。
+
+将下载后的离线 SDK 包中的 SDK 文件夹放到当前项目的根目录下。
+
+## 引入 App 资源
+
+每个 uni-app 项目都有自己的应用标识，可在配置文件 mainfest.json 中的【基础配置】里看到。关于 AppID 的更多信息，详见 [DCloud appid 用途/作用/使用说明](https://ask.dcloud.net.cn/article/35907)。
+
+1. 生成本地打包 App 资源
+
+   打开 HBuilderX 项目，选择【发行】-【原生App-本地打包】-【生成本地打包App资源】。
+
+2. 拷贝 App 资源到插件工程
+
+   将该文件夹拷贝到工程的 app/src/main/assets/apps 路径下，确保该路径名称为你的 AppID文件夹
+
+3. 修改 app/src/main/assets/data/dcloud_control.xml 里面 app 节点的 appid 属性为你的 AppID。
+
+## 
 
 ### Android 离线打包集成
 
-Android 原生离线打包参考官方文档：[uni-app原生插件集成指南](https://nativesupport.dcloud.net.cn/NativePlugin/offline_package/android?id=uni-app原生插件集成指南)。
+由于 uni-app 的云端打包限制了每日免费打包的次数以及免费打包的包体的大小（超过40M每次打包需充值付费），使用离线打包的方式会更加自由、方便。
+
+#### 自定义基座
+
+点击菜单栏【Build】-【Build Bundle(s) / APK(s)】-【Build Apk(s)】，将会在app/build/outputs/apk/debug 下生成 android_debug.apk 文件，这个就是自定义基座。
+
+将生成的 android_debug.apk 文件放到 HBuilderX 项目下的 unpackage/debug 路径下，选择 HBuilderX 菜单栏【运行】-【运行到手机或模拟器】-【运行基座选择】-【自定义基座】。然后运行到对应的Android设备即可。
+
+
+
+#### 正式包
+
+打开 app/build.gradle，修改【versionCode】和【versionName】为需要的版本号。
+
+选择【Build】-【Generate Signed Bundle / APK...】，在弹窗中选择【APK】，点击 Next。
+
+选择签名证书文件，如果没有请新建【Create New...】，按实际情况填写构建证书，相关信息和文件请保存下来，下一次打包迭代发版时也会用到。（如果证书不同，将会导致应用无法直接升级安装，需要卸载安装。）
+
+按创建证书时填写的信息，输入Key的相关信息，点击Next，选择【release】，并将弹窗下方【Signature Version】一起勾选 V1 和 V2。点击Finish，将会生成正式包，位于 app/release/下。
+
+
 
 ## 快速使用
 

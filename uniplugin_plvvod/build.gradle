@@ -1,0 +1,86 @@
+apply plugin: 'com.android.library'
+
+android {
+    compileSdkVersion 28
+    defaultConfig {
+        minSdkVersion 19
+        targetSdkVersion 28
+        versionCode 3
+        versionName "0.0.3"
+
+        testInstrumentationRunner "android.support.test.runner.AndroidJUnitRunner"
+        consumerProguardFiles 'consumer-rules.pro'
+
+        ndk {
+            abiFilters 'x86','armeabi-v7a','arm64-v8a'
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+    }
+
+}
+
+//导入aar需要的配置
+repositories {
+    flatDir {
+        dirs 'libs'
+    }
+}
+
+dependencies {
+
+    compileOnly fileTree(dir: 'libs', include: ['*.jar'])
+
+    compileOnly fileTree(dir: '../app/libs', include: ['uniapp-v8-release.aar'])
+
+    compileOnly "com.android.support:recyclerview-v7:25.3.1"
+    compileOnly "com.android.support:support-v4:25.3.1"
+    compileOnly "com.android.support:appcompat-v7:25.3.1"
+    implementation 'com.alibaba:fastjson:1.1.46.android'
+    implementation 'com.facebook.fresco:fresco:0.12.0'
+
+    //SDK核心包
+//    api ('com.easefun.polyv:polyvPlayer:2.13.0')
+    //SDK核心包
+//    api 'com.easefun.polyv:polyvPlayerABI:1.9.6'
+
+
+    //以下的库在发布插件的时候不应参与打包
+    //打debug包在自定义基座时候用到，需要打进去
+    debugImplementation files('libs/commons-compress-1.12.jar')
+    debugImplementation files('libs/ijkplayer-exo-0.8.8.jar')
+    debugImplementation files('libs/ijkplayer-java-0.8.8.jar')
+    debugImplementation files('libs/polyvDownload2.13.0.jar')
+    debugImplementation files('libs/polyvPlayer2.13.1.jar')
+    debugImplementation files('libs/polyvWidget1.4.6.jar')
+    debugImplementation files('libs/gson-2.8.5.jar')
+    debugImplementation files('libs/utdid4all-1.1.5.3_proguard.jar')//是否要httpdns
+    debugImplementation files('libs/zip4j-1.3.2.jar')
+    debugImplementation files('libs/bugly-release.aar')
+    debugImplementation files('libs/alicloud-android-httpdns-1.2.5.aar')
+    debugImplementation files('libs/alicloud-android-beacon-1.0.1.jar')
+    debugImplementation files('libs/alicloud-android-ut-5.4.0.jar')
+    debugImplementation files('libs/alicloud-android-utils-1.1.3.jar')
+
+    //release下生成插件包需要用compileOnly依赖，打aar时将不会把以下三方库打进去，需要手动复制到插件包更新
+    compileOnly files('libs/commons-compress-1.12.jar')
+    compileOnly files('libs/ijkplayer-exo-0.8.8.jar')
+    compileOnly files('libs/ijkplayer-java-0.8.8.jar')
+    compileOnly files('libs/polyvDownload2.13.0.jar')
+    compileOnly files('libs/polyvPlayer2.13.1.jar')
+    compileOnly files('libs/polyvWidget1.4.6.jar')
+    compileOnly files('libs/gson-2.8.5.jar')
+    compileOnly files('libs/utdid4all-1.1.5.3_proguard.jar')//是否要httpdns
+    compileOnly files('libs/zip4j-1.3.2.jar')
+    compileOnly files('libs/bugly-release.aar')
+    compileOnly files('libs/alicloud-android-httpdns-1.2.5.aar')
+    compileOnly files('libs/alicloud-android-beacon-1.0.1.jar')
+    compileOnly files('libs/alicloud-android-ut-5.4.0.jar')
+    compileOnly files('libs/alicloud-android-utils-1.1.3.jar')
+
+}
