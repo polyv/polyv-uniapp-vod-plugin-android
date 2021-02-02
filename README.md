@@ -82,6 +82,10 @@ Android 开发环境：JDK 1.8+， AndroidStudio 3.0+
 
 按创建证书时填写的信息，输入Key的相关信息，点击Next，选择【release】，并将弹窗下方【Signature Version】一起勾选 V1 和 V2。点击Finish，将会生成正式包，位于 app/release/下。
 
+### 项目配置
+关于如何对 app 进行个性化配置，譬如 app 图标、app 名称、app 版本号、app 启动图等，uni-app 官方有详细的文档指导，见：[Android 原生工程配置](https://nativesupport.dcloud.net.cn/AppDocs/usesdk/android)。
+
+该项目还支持添加其他 uni-app 原生插件，添加方法详见 uni-app 官方的指引文档 [Android 离线打包使用插件](https://nativesupport.dcloud.net.cn/NativePlugin/offline_package/android)。
 
 
 ## 快速使用
