@@ -708,7 +708,7 @@ public class PolyvVodComponent extends WXComponent<PolyvVodView> {
         }
     }
 
-/*    @JSMethod(uiThread = true)
+    @JSMethod(uiThread = true)
     public void hideMarquee() {
         Log.d(TAG, "hideMarquee");
         if (getHostView().getVideoView() != null) {
@@ -719,8 +719,6 @@ public class PolyvVodComponent extends WXComponent<PolyvVodView> {
             getHostView().getMarqueeView().removeAllItem();
         }
     }
-
-*/
 
 
     // </editor-fold>

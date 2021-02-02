@@ -34,6 +34,16 @@ Android 开发环境：JDK 1.8+， AndroidStudio 3.0+
 
 将下载后的离线 SDK 包中的 SDK 文件夹放到当前项目的根目录下。
 
+
+
+## SDK 集成
+
+为避免SDK更新导致的插件兼容问题，开发者应当根据集成的版本下载Android 离线SDK：https://nativesupport.dcloud.net.cn/AppDocs/download/android。
+
+然后按照[官方文档](https://nativesupport.dcloud.net.cn/AppDocs/usesdk/android?id=配置工程)，更新 app/libs 下的对应sdk文件。
+
+
+
 ## 引入 App 资源
 
 每个 uni-app 项目都有自己的应用标识，可在配置文件 mainfest.json 中的【基础配置】里看到。关于 AppID 的更多信息，详见 [DCloud appid 用途/作用/使用说明](https://ask.dcloud.net.cn/article/35907)。
