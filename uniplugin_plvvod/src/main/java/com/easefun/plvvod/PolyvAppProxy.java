@@ -9,21 +9,31 @@ import com.easefun.plvvod.utils.PolyvStorageUtils;
 import com.easefun.polyvsdk.PolyvDevMountInfo;
 import com.easefun.polyvsdk.PolyvDownloaderManager;
 import com.easefun.polyvsdk.PolyvSDKClient;
+import com.easefun.polyvsdk.log.PolyvCommonLog;
 
 import java.io.File;
 import java.util.ArrayList;
 
+import io.dcloud.feature.uniapp.AbsSDKInstance;
+import io.dcloud.feature.uniapp.UniSDKInstance;
 import io.dcloud.weex.AppHookProxy;
 
 public class PolyvAppProxy implements AppHookProxy {
     String TAG = "PolyvAppProxy";
 
+    public static AbsSDKInstance mAppSDKInstance;
+
     @Override
     public void onCreate(Application application) {
+        PolyvCommonLog.d(TAG, "Polyv Init");
         PolyvSDKClient client = PolyvSDKClient.getInstance();
+        client.enableHttpDns(false);
+        client.enableIPV6(true);
         client.initSetting(application);
         //设置下载目录
         setDownloadDir(application);
+
+        mAppSDKInstance = new UniSDKInstance(application);
     }
 
     /**

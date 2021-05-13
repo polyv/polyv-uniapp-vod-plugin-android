@@ -1,14 +1,15 @@
 package com.easefun.plvvod;
 
-import android.content.Context;
-import android.content.SharedPreferences;
 import android.support.annotation.NonNull;
+import android.support.annotation.Nullable;
 import android.util.Log;
 
 import com.alibaba.fastjson.JSONArray;
 import com.alibaba.fastjson.JSONObject;
+import com.easefun.plvvod.database.PolyvDownloadSQLiteHelper;
 import com.easefun.plvvod.utils.JsonOptionUtil;
 import com.easefun.plvvod.utils.PolyvErrorMessageUtils;
+import com.easefun.plvvod.vo.PolyvDownloadInfo;
 import com.easefun.plvvod.vo.VideoInfoVO;
 import com.easefun.polyvsdk.PolyvBitRate;
 import com.easefun.polyvsdk.PolyvDownloader;
@@ -16,12 +17,15 @@ import com.easefun.polyvsdk.PolyvDownloaderErrorReason;
 import com.easefun.polyvsdk.PolyvDownloaderManager;
 import com.easefun.polyvsdk.PolyvSDKClient;
 import com.easefun.polyvsdk.PolyvSDKUtil;
+import com.easefun.polyvsdk.Video;
 import com.easefun.polyvsdk.download.listener.IPolyvDownloaderProgressListener2;
 import com.easefun.polyvsdk.download.listener.IPolyvDownloaderStopListener;
 import com.easefun.polyvsdk.download.util.PolyvDownloaderUtils;
-import com.easefun.polyvsdk.video.PolyvValidateM3U8VideoReturnType;
+import com.easefun.polyvsdk.log.PolyvCommonLog;
 import com.easefun.polyvsdk.video.PolyvVideoUtil;
 import com.easefun.polyvsdk.vo.PolyvValidateLocalVideoVO;
+import com.easefun.polyvsdk.vo.PolyvVideoVO;
+import com.easefun.polyvsdk.vo.listener.PolyvVideoVOLoadedListener;
 import com.taobao.weex.annotation.JSMethod;
 import com.taobao.weex.bridge.JSCallback;
 import com.taobao.weex.common.WXModule;
@@ -29,23 +33,14 @@ import com.taobao.weex.common.WXModule;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedList;
+import java.util.List;
 import java.util.Map;
-import java.util.Set;
-import java.util.TreeSet;
-
 
 public class PolyvDownloadModule extends WXModule {
 
     private String TAG = "PolyvDownloadModule";
 
-    private static final String SHARED_PREFERENCES_NAME = "download_shared_preferences_key";
-    private static final String VIDEO_ID_LIST_KEY = "video_id_list_key";
-
-
-    /**
-     * vid最后回调的下载中时间戳Map
-     */
-    private Map<String, Long> lastCallbackProgressTimeMap = new HashMap<String, Long>();
     /**
      * vid最后下载进度
      */
@@ -53,159 +48,80 @@ public class PolyvDownloadModule extends WXModule {
     /**
      * 下载中回调间隔秒
      */
-    private int downloadingCallbackIntervalSeconds = 0;
+    private int downloadingCallbackIntervalSeconds = 1;
 
+    private JSCallback downloadCallback;
 
     @JSMethod(uiThread = true)
     public void addDownloader(JSONObject options, final JSCallback callback) {
         if (options == null) {
             return;
         }
+        final JSONObject error = new JSONObject();
 
-        JSONArray downloadArr = options.getJSONArray("downloadArr");
+        //添加数据库
+        final PolyvDownloadSQLiteHelper downloadSQLiteHelper = PolyvDownloadSQLiteHelper.getInstance(mWXSDKInstance.getContext());
 
-        SharedPreferences sharedPreferences = mWXSDKInstance.getContext().getSharedPreferences(SHARED_PREFERENCES_NAME, Context.MODE_PRIVATE);
-        Set<String> set = sharedPreferences.getStringSet(VIDEO_ID_LIST_KEY, new TreeSet<String>());
+        List<VideoInfoVO> downloadArr = VideoInfoVO.arrayVideoInfoVOFromData(options.toJSONString(), "downloadArr");
 
-        int length = downloadArr == null ? 0 : downloadArr.size();
-        JSONObject jsonObject;
-
-        JSONObject error = null;
-        SharedPreferences.Editor editor = null;
-        for (int i = 0; i < length; i++) {
-            jsonObject = downloadArr.getJSONObject(i);
-            if (jsonObject != null) {
-                final String vid = JsonOptionUtil.getString(jsonObject, "vid", "");
-                if (PolyvSDKUtil.validateVideoId(vid)) {
-                    int level = JsonOptionUtil.getInt(jsonObject, "level", PolyvBitRate.liuChang.getNum());
-
-                    PolyvBitRate bitRate = PolyvBitRate.getBitRate(level);
-                    if (bitRate == null) {
-                        bitRate = PolyvBitRate.liuChang;
-                    }
-
-                    if (set.contains(vid) && sharedPreferences.contains(vid)) {
-                        int saveLevel = sharedPreferences.getInt(vid, PolyvBitRate.liuChang.getNum());
-                        if (bitRate.getNum() != saveLevel) {
-                            if (error == null) {
-                                error = new JSONObject();
-                            }
-
-                            if (callback != null) {
-                                JSONObject vidJsonObject = new JSONObject();
-                                vidJsonObject.put("errMsg", "有其他码率视频在下载列表，请先删除原有的再添加");
-                                Log.d(TAG, "addDownloader: vid=" + vid + " already have other bitrate in download list");
-                                error.put(vid, vidJsonObject);
-                            }
-
-                        }
-                    }
-                    Log.d(TAG, "addDownloader: vid=" + vid + " level=" + bitRate.getNum());
-                    final PolyvDownloader polyvDownloader = PolyvDownloaderManager.getPolyvDownloader(vid, bitRate.getNum());
-                    polyvDownloader.setPolyvDownloadProressListener2(new IPolyvDownloaderProgressListener2() {
+        for (final VideoInfoVO infoVO : downloadArr) {
+            if (PolyvSDKUtil.validateVideoId(infoVO.getVid())) {
+                final PolyvDownloadInfo tempInfo = new PolyvDownloadInfo(infoVO.getVid(), infoVO.getLevel());
+                if (downloadSQLiteHelper != null && !downloadSQLiteHelper.isAdd(tempInfo)) {
+                    //加载视频信息
+                    PolyvVideoVO.loadVideo(infoVO.getVid(), new PolyvVideoVOLoadedListener() {
                         @Override
-                        public void onDownload(long current, long total) {
-                            int progress = (int) (current * 100 / total);
-                            videoLastDownloadProgress.put(vid, progress);
-                            Log.d(TAG, progress + "");
+                        public void onloaded(@Nullable Video videoVO) {
+                            if (videoVO == null) {
+                                Log.d(TAG, "addDownloader: load video is null");
+                                error.put(infoVO.getVid(), buildErrorObject("获取视频信息失败"));
+                                if (callback != null && !error.isEmpty()) {
+                                    callback.invokeAndKeepAlive(error);
+                                }
+                            } else {
+                                PolyvBitRate bitRate = PolyvBitRate.getBitRate(infoVO.getLevel());
+                                if (bitRate == null) {
+                                    bitRate = PolyvBitRate.liuChang;
+                                }
 
-                            long currentTimeMillis = System.currentTimeMillis();
-                            if (lastCallbackProgressTimeMap.containsKey(vid)) {
-                                if (currentTimeMillis - lastCallbackProgressTimeMap.get(vid) < downloadingCallbackIntervalSeconds * 1000) {
-                                    return;
+                                //根据视频信息序列化到本地
+                                final PolyvDownloadInfo downloadInfo = new PolyvDownloadInfo(infoVO.getVid(), videoVO.getDuration(),
+                                        videoVO.getFileSizeMatchFileType(bitRate.getNum(), PolyvDownloader.FILE_VIDEO), bitRate.getNum(), videoVO.getTitle());
+                                downloadInfo.setFileType(PolyvDownloader.FILE_VIDEO);
+                                PolyvCommonLog.d(TAG, downloadInfo.toString());
+                                downloadSQLiteHelper.insert(downloadInfo);
+
+                                //添加到下载器
+                                final PolyvDownloader polyvDownloader = PolyvDownloaderManager.getPolyvDownloader(infoVO.getVid(), bitRate.getNum());
+                                polyvDownloader.setSpeedCallbackInterval(downloadingCallbackIntervalSeconds);
+                                polyvDownloader.setPolyvDownloadProressListener2(new UniVodDownloadListener(downloadCallback, downloadInfo));
+                                polyvDownloader.setPolyvDownloadStopListener(new UniVodDownloadStopListener(downloadCallback, downloadInfo));
+
+                                JSONObject result = new JSONObject();
+                                JSONObject vidJsonObject = new JSONObject();
+                                vidJsonObject.put("downloadStatus", "ready");
+                                vidJsonObject.put("downloadPercentage", 0);
+                                result.put(infoVO.getVid(), vidJsonObject);
+                                if (downloadCallback != null) {
+                                    downloadCallback.invokeAndKeepAlive(result);
                                 }
                             }
-
-                            lastCallbackProgressTimeMap.put(vid, currentTimeMillis);
-
-                            JSONObject result = new JSONObject();
-                            JSONObject vidJsonObject = new JSONObject();
-                            vidJsonObject.put("downloadStatus", "downloading");
-                            vidJsonObject.put("downloadPercentage", progress);
-                            result.put(vid, vidJsonObject);
-                            if (callback != null) {
-                                callback.invokeAndKeepAlive(result);
-                            }
-                        }
-
-                        @Override
-                        public void onDownloadSuccess(int i) {
-                            JSONObject result = new JSONObject();
-                            JSONObject vidJsonObject = new JSONObject();
-                            vidJsonObject.put("downloadStatus", "finished");
-                            vidJsonObject.put("downloadPercentage", 100);
-                            Log.d(TAG, "DownloadSuccess: " + vid);
-                            result.put(vid, vidJsonObject);
-                            if (callback != null) {
-                                callback.invokeAndKeepAlive(result);
-                            }
-                        }
-
-                        @Override
-                        public void onDownloadFail(@NonNull PolyvDownloaderErrorReason polyvDownloaderErrorReason) {
-                            JSONObject result = new JSONObject();
-                            JSONObject vidJsonObject = new JSONObject();
-
-                            vidJsonObject.put("downloadStatus", "failed");
-                            vidJsonObject.put("downloadPercentage", 0);
-                            String message = PolyvErrorMessageUtils.getDownloaderErrorMessage(polyvDownloaderErrorReason.getType());
-                            message += "(error code " + polyvDownloaderErrorReason.getType().getCode() + ")";
-                            vidJsonObject.put("errMsg", message);
-                            Log.d(TAG, "DownloadFail: " + message);
-
-                            result.put(vid, vidJsonObject);
-
-                            if (callback != null) {
-                                callback.invokeAndKeepAlive(result);
-                            }
                         }
                     });
-                    polyvDownloader.setPolyvDownloadStopListener(new IPolyvDownloaderStopListener() {
-                        @Override
-                        public void onStop() {
-                            JSONObject result = new JSONObject();
-                            JSONObject vidJsonObject = new JSONObject();
-                            vidJsonObject.put("downloadStatus", "stopped");
-                            result.put(vid, vidJsonObject);
-                            if (callback != null) {
-                                callback.invokeAndKeepAlive(result);
-                            }
-                        }
-                    });
-
-
-                    if (!set.contains(vid)) {
-                        set.add(vid);
-
-                        editor = sharedPreferences.edit();
-                        editor.putStringSet(VIDEO_ID_LIST_KEY, set);
-                        editor.putInt(vid, bitRate.getNum());
-                        editor.apply();
-                    }
-
-                    JSONObject result = new JSONObject();
-                    JSONObject vidJsonObject = new JSONObject();
-                    vidJsonObject.put("downloadStatus", "ready");
-                    vidJsonObject.put("downloadPercentage", 0);
-                    result.put(vid, vidJsonObject);
-                    if (callback != null) {
-                        callback.invokeAndKeepAlive(result);
-                    }
                 } else {
-                    if (error == null) {
-                        error = new JSONObject();
-                    }
-                    Log.d(TAG, "vid is not correct: " + vid);
-                    error.put(vid, "视频id不正确，请设置正确的视频id进行下载");
+                    Log.e(TAG, "addDownloader: vid=" + infoVO.getVid() + " already have other bitrate in download list");
+                    error.put(infoVO.getVid(), buildErrorObject("有其他码率视频在下载列表，请先删除原有的再添加"));
+
                 }
+
+            } else {
+                Log.e(TAG, "vid is not correct: " + infoVO.getVid());
+                error.put(infoVO.getVid(), "视频id不正确，请设置正确的视频id进行下载");
             }
         }
 
-        if (editor != null) {
-            editor.commit();
-        }
 
-        if (callback != null && error != null) {
+        if (callback != null && !error.isEmpty()) {
             callback.invokeAndKeepAlive(error);
         }
     }
@@ -215,17 +131,22 @@ public class PolyvDownloadModule extends WXModule {
         if (callback == null) {
             return;
         }
-        SharedPreferences sharedPreferences = mWXSDKInstance.getContext().getSharedPreferences(SHARED_PREFERENCES_NAME, Context.MODE_PRIVATE);
-        Set<String> set = sharedPreferences.getStringSet(VIDEO_ID_LIST_KEY, new TreeSet<String>());
 
+        PolyvDownloadSQLiteHelper downloadSQLiteHelper = PolyvDownloadSQLiteHelper.getInstance(mWXSDKInstance.getContext());
+        LinkedList<PolyvDownloadInfo> downloadInfos = downloadSQLiteHelper.getAll();
         JSONArray downloadList = new JSONArray();
         JSONObject downloadItem;
-        for (String videoId : set) {
+        for (PolyvDownloadInfo info : downloadInfos) {
             downloadItem = new JSONObject();
-            downloadItem.put("vid", videoId);
-            downloadItem.put("level", sharedPreferences.getInt(videoId, PolyvBitRate.liuChang.getNum()));
+            downloadItem.put("vid", info.getVid());
+            downloadItem.put("level", info.getBitrate());
+            downloadItem.put("duration", info.getDuration());
+            downloadItem.put("fileSize", info.getFilesize());
+            downloadItem.put("title", info.getTitle());
+            downloadItem.put("progress", info.getPercent());
             downloadList.add(downloadItem);
         }
+
         Log.d(TAG, "getDownloadList: " + downloadList.toString());
 
         JSONObject result = new JSONObject();
@@ -250,29 +171,48 @@ public class PolyvDownloadModule extends WXModule {
             return;
         }
 
-        SharedPreferences sharedPreferences = mWXSDKInstance.getContext().getSharedPreferences(SHARED_PREFERENCES_NAME, Context.MODE_PRIVATE);
-        Set<String> set = sharedPreferences.getStringSet(VIDEO_ID_LIST_KEY, new TreeSet<String>());
+        PolyvDownloadSQLiteHelper downloadSQLiteHelper = PolyvDownloadSQLiteHelper.getInstance(mWXSDKInstance.getContext());
 
-        if (!set.contains(vid)) {
+        PolyvDownloadInfo downloadInfo = downloadSQLiteHelper.getDownloadInfo(vid);
+        if (downloadInfo == null) {
             if (callback != null) {
                 JSONObject error = new JSONObject();
                 Log.d(TAG, "startDownloader: " + "download list no this vid: " + vid);
-                error.put("errMsg", "下载列表没有此视频，请删除视频后重新下载");
+                error.put("errMsg", "下载列表没有此视频");
                 callback.invoke(error);
             }
             return;
         }
 
-        int level = sharedPreferences.getInt(vid, PolyvBitRate.liuChang.getNum());
-        Log.d(TAG, "startDownloader: vid=" + vid + " level=" + level);
-        PolyvDownloader polyvDownloader = PolyvDownloaderManager.getPolyvDownloader(vid, level);
+        Log.d(TAG, "startDownloader: vid=" + vid + " level=" + downloadInfo.getBitrate());
+        PolyvDownloader polyvDownloader = PolyvDownloaderManager.getPolyvDownloader(vid, downloadInfo.getBitrate());
         polyvDownloader.start(mWXSDKInstance.getContext());
+
     }
 
     @JSMethod(uiThread = true)
     public synchronized void startAllDownloader() {
         Log.d(TAG, "startAllDownloader");
-        PolyvDownloaderManager.startAll(mWXSDKInstance.getContext());
+
+        PolyvDownloadSQLiteHelper downloadSQLiteHelper = PolyvDownloadSQLiteHelper.getInstance(mWXSDKInstance.getContext());
+
+        // 已完成的任务key集合
+        List<String> finishKey = new ArrayList<>();
+        List<PolyvDownloadInfo> downloadInfos = downloadSQLiteHelper.getAll();
+        for (int i = 0; i < downloadInfos.size(); i++) {
+            PolyvDownloadInfo downloadInfo = downloadInfos.get(i);
+            long percent = downloadInfo.getPercent();
+            long total = downloadInfo.getTotal();
+            int progress = 0;
+            if (total != 0)
+                progress = (int) (percent * 100 / total);
+            if (progress == 100)
+                finishKey.add(PolyvDownloaderManager.getKey(downloadInfo.getVid(), downloadInfo.getBitrate(), downloadInfo.getFileType()));
+        }
+
+        PolyvDownloaderManager.startUnfinished(finishKey, mWXSDKInstance.getContext());
+        Log.d(TAG, "startAllDownloader-finish");
+
     }
 
     @JSMethod(uiThread = true)
@@ -291,29 +231,22 @@ public class PolyvDownloadModule extends WXModule {
             return;
         }
 
-        SharedPreferences sharedPreferences = mWXSDKInstance.getContext().getSharedPreferences(SHARED_PREFERENCES_NAME, Context.MODE_PRIVATE);
-        Set<String> set = sharedPreferences.getStringSet(VIDEO_ID_LIST_KEY, new TreeSet<String>());
-        if (!set.contains(vid)) {
+        PolyvDownloadSQLiteHelper downloadSQLiteHelper = PolyvDownloadSQLiteHelper.getInstance(mWXSDKInstance.getContext());
+        PolyvDownloadInfo downloadInfo = downloadSQLiteHelper.getDownloadInfo(vid);
+        if (downloadInfo == null) {
+            if (callback != null) {
+                JSONObject error = new JSONObject();
+                PolyvCommonLog.d(TAG, "startDownloader: " + "download list no this vid: " + vid);
+                error.put("vid", vid);
+                error.put("errMsg", "下载列表没有此视频");
+                callback.invoke(error);
+            }
             return;
         }
 
-        int level = sharedPreferences.getInt(vid, PolyvBitRate.liuChang.getNum());
-        PolyvDownloader polyvDownloader = PolyvDownloaderManager.getPolyvDownloader(vid, level);
+        PolyvDownloader polyvDownloader = PolyvDownloaderManager.getPolyvDownloader(vid, downloadInfo.getBitrate());
         polyvDownloader.stop();
-        Log.d(TAG, "stopDownloader" + " vid: " + vid + " level:" + level);
-        if (callback != null) {
-            JSONObject result = new JSONObject();
-            JSONObject vidJsonObject = new JSONObject();
-            int progress = 0;
-            if (videoLastDownloadProgress.containsKey(vid)) {
-                progress = videoLastDownloadProgress.get(vid);
-            }
-
-            vidJsonObject.put("downloadStatus", "stopped");
-            vidJsonObject.put("downloadPercentage", progress);
-            result.put(vid, vidJsonObject);
-            callback.invoke(result);
-        }
+        PolyvCommonLog.d(TAG, "stopDownloader" + " vid: " + vid + " level:" + downloadInfo.getBitrate());
     }
 
 
@@ -321,23 +254,6 @@ public class PolyvDownloadModule extends WXModule {
     public synchronized void stopAllDownloader(JSONObject options, final JSCallback callback) {
         Log.d(TAG, "stopAllDownloader");
         PolyvDownloaderManager.stopAll();
-        SharedPreferences sharedPreferences = mWXSDKInstance.getContext().getSharedPreferences(SHARED_PREFERENCES_NAME, Context.MODE_PRIVATE);
-        Set<String> set = sharedPreferences.getStringSet(VIDEO_ID_LIST_KEY, new TreeSet<String>());
-        if (callback != null) {
-            for (String vid : set) {
-                JSONObject result = new JSONObject();
-                JSONObject vidJsonObject = new JSONObject();
-                int progress = 0;
-                if (videoLastDownloadProgress.containsKey(vid)) {
-                    progress = videoLastDownloadProgress.get(vid);
-                }
-
-                vidJsonObject.put("downloadStatus", "stopped");
-                vidJsonObject.put("downloadPercentage", progress);
-                result.put(vid, vidJsonObject);
-                callback.invokeAndKeepAlive(result);
-            }
-        }
     }
 
     @JSMethod(uiThread = false)
@@ -392,51 +308,25 @@ public class PolyvDownloadModule extends WXModule {
             return;
         }
 
-        Log.d(TAG, "deleteVideo: " + vid);
+        Log.d(TAG, "start deleteVideo: " + vid);
 
-        SharedPreferences sharedPreferences = mWXSDKInstance.getContext().getSharedPreferences(SHARED_PREFERENCES_NAME, Context.MODE_PRIVATE);
-        Set<String> set = sharedPreferences.getStringSet(VIDEO_ID_LIST_KEY, new TreeSet<String>());
-        if (!set.contains(vid)) {
-            PolyvDownloaderUtils.deleteVideo(vid);
-            return;
+        PolyvDownloadSQLiteHelper downloadSQLiteHelper = PolyvDownloadSQLiteHelper.getInstance(mWXSDKInstance.getContext());
+        PolyvDownloadInfo downloadInfo = downloadSQLiteHelper.getDownloadInfo(vid);
+        if (downloadInfo != null) {
+            downloadSQLiteHelper.delete(vid);
+            PolyvDownloader polyvDownloader = PolyvDownloaderManager.clearPolyvDownload(vid, downloadInfo.getBitrate());
+            polyvDownloader.delete();
         }
+        PolyvDownloaderUtils.deleteVideo(vid);
 
-        int level = sharedPreferences.getInt(vid, PolyvBitRate.liuChang.getNum());
-        PolyvDownloader polyvDownloader = PolyvDownloaderManager.clearPolyvDownload(vid, level);
-        polyvDownloader.deleteVideo(vid, level);
-
-        lastCallbackProgressTimeMap.remove(vid);
-        videoLastDownloadProgress.remove(vid);
-
-        set.remove(vid);
-        SharedPreferences.Editor editor = sharedPreferences.edit();
-        editor.putStringSet(VIDEO_ID_LIST_KEY, set);
-        editor.remove(vid);
-        editor.apply();
-        editor.commit();
     }
 
     @JSMethod(uiThread = true)
     public void deleteAllVideo() {
-        Log.d(TAG, "deleteAllVideo");
-        SharedPreferences sharedPreferences = mWXSDKInstance.getContext().getSharedPreferences(SHARED_PREFERENCES_NAME, Context.MODE_PRIVATE);
-        Set<String> set = sharedPreferences.getStringSet(VIDEO_ID_LIST_KEY, new TreeSet<String>());
-        PolyvDownloader polyvDownloader;
-        for (String vid : set) {
-            int level = sharedPreferences.getInt(vid, PolyvBitRate.liuChang.getNum());
-            polyvDownloader = PolyvDownloaderManager.clearPolyvDownload(vid, level);
-            polyvDownloader.deleteVideo(vid, level);
+        PolyvDownloadSQLiteHelper downloadSQLiteHelper = PolyvDownloadSQLiteHelper.getInstance(mWXSDKInstance.getContext());
 
-            lastCallbackProgressTimeMap.remove(vid);
-            videoLastDownloadProgress.remove(vid);
-        }
-
-        set.clear();
-        SharedPreferences.Editor editor = sharedPreferences.edit();
-        editor.clear();
-        editor.apply();
-        editor.commit();
         PolyvDownloaderUtils.deleteDownloaderDir();
+        downloadSQLiteHelper.release();
     }
 
     @JSMethod(uiThread = true)
@@ -450,125 +340,141 @@ public class PolyvDownloadModule extends WXModule {
         }
         Log.d(TAG, "setDownloadCallbackInterval: " + seconds);
         downloadingCallbackIntervalSeconds = seconds;
-
     }
 
-    private boolean validateVideoExist(String vid, ArrayList<File> dirList) {
-        String fileName, vpbid;
-        VideoInfoVO videoInfo;
-        for (File dir : dirList) {
-            if (!dir.isDirectory()) {
-                continue;
+    @JSMethod(uiThread = true)
+    public void setListenDownloadStatus(JSONObject options, JSCallback callback) {
+        PolyvCommonLog.d(TAG, "setListenDownloadStatus");
+        //因为Android中离开页面后callback重新进入，callback不能正常回调进度，keepAlive不行，成员变量callback也不行
+        //设置自定义事件也会失败，只有第一次进入页面可以。可能是多线程下实例在跨语言通信中存在问题（基于3.0.5测试）
+        //所以这里通过接口专门获取这个callback，每次都getALl，重新设置监听器
+
+        PolyvDownloadSQLiteHelper downloadSQLiteHelper = PolyvDownloadSQLiteHelper.getInstance(mWXSDKInstance.getContext());
+
+        downloadCallback = callback;
+        // 已完成的任务key集合
+
+        List<PolyvDownloadInfo> downloadInfos = downloadSQLiteHelper.getAll();
+        for (int i = 0; i < downloadInfos.size(); i++) {
+            PolyvDownloadInfo downloadInfo = downloadInfos.get(i);
+            long percent = downloadInfo.getPercent();
+            long total = downloadInfo.getTotal();
+            int progress = 0;
+            if (total != 0) {
+                progress = (int) (percent * 100 / total);
+            }
+            if (progress != 100) {
+                //getDownloader
+                PolyvDownloader downloader = PolyvDownloaderManager.getPolyvDownloader(downloadInfo.getVid(), downloadInfo.getBitrate());
+                if (callback == null) {
+                    downloader.setPolyvDownloadProressListener2(null);
+                    downloader.setPolyvDownloadStopListener(null);
+                    continue;
+                }
+                downloader.setPolyvDownloadProressListener2(new UniVodDownloadListener(callback, downloadInfo));
+                downloader.setPolyvDownloadStopListener(new UniVodDownloadStopListener(callback, downloadInfo));
+            }
+        }
+    }
+
+    private JSONObject buildErrorObject(String errMsg) {
+        JSONObject errorObject = new JSONObject();
+        errorObject.put("errMsg", errMsg);
+        return errorObject;
+    }
+
+    class UniVodDownloadListener implements IPolyvDownloaderProgressListener2 {
+
+        PolyvDownloadSQLiteHelper downloadHelper;
+        JSCallback jsCallback;
+        PolyvDownloadInfo info;
+
+        UniVodDownloadListener(JSCallback callback, PolyvDownloadInfo downloadInfo) {
+            downloadHelper = PolyvDownloadSQLiteHelper.getInstance(mWXSDKInstance.getContext());
+            jsCallback = callback;
+            info = downloadInfo;
+        }
+
+        @Override
+        public void onDownload(long current, long total) {
+            int progress = (int) (current * 100 / total);
+            videoLastDownloadProgress.put(info.getVid(), progress);
+            Log.d(TAG, "onDownload: " + progress);
+
+            downloadHelper.update(info, progress, total);
+
+            JSONObject result = new JSONObject();
+            JSONObject vidJsonObject = new JSONObject();
+            vidJsonObject.put("downloadStatus", "downloading");
+            vidJsonObject.put("downloadPercentage", progress);
+            result.put(info.getVid(), vidJsonObject);
+            if (jsCallback != null) {
+                jsCallback.invokeAndKeepAlive(result);
             }
 
-            if (!dir.exists()) {
-                continue;
-            }
+        }
 
-            File[] files = dir.listFiles();
-            if (files == null || files.length == 0) {
-                continue;
-            }
+        @Override
+        public void onDownloadSuccess(int i) {
+            videoLastDownloadProgress.put(info.getVid(), 100);
+            info.setBitrate(i);
+            downloadHelper.update(info, 100, info.getFilesize());
 
-            for (File file : files) {
-                if (file.isDirectory()) {
-                    //2.0 m3u8的存储结构vpbid/vpbid.m3u8
-                    fileName = file.getName();
-                    //判断目录名称是否是videoPoolBitrate的结构
-                    if (PolyvSDKUtil.validateVideoPoolBitrateId(fileName)) {
-                        vpbid = fileName;
-                        videoInfo = getVideoInfo(vpbid);
-                        if (!videoInfo.getVideoId().equals(vid)) {
-                            continue;
-                        }
-
-                        int validateResult = PolyvVideoUtil.validateM3U8Video(videoInfo.getVideoId(), videoInfo.getBitrate());
-                        switch (validateResult) {
-                            case PolyvValidateM3U8VideoReturnType.M3U8_CORRECT:
-                                return true;
-                            case PolyvValidateM3U8VideoReturnType.M3U8_FILE_NOT_FOUND:
-                                break;
-                            case PolyvValidateM3U8VideoReturnType.M3U8_FILE_CONTENT_EMPTY:
-                            case PolyvValidateM3U8VideoReturnType.M3U8_KEY_FILE_NOT_FOUND:
-                            case PolyvValidateM3U8VideoReturnType.M3U8_TS_FILE_NOT_FOUND:
-                            case PolyvValidateM3U8VideoReturnType.M3U8_TS_LIST_EMPTY:
-                                return false;
-                        }
-                    }
-
-                    continue;
-                }
-
-                //过滤key,json文件
-                fileName = file.getName();
-                if (fileName.endsWith(".key") || fileName.endsWith(".json")) {
-                    continue;
-                }
-
-                //获取文件名前缀
-                int index = fileName.lastIndexOf(".");
-                if (index != -1) {
-                    vpbid = fileName.substring(0, index);
-                } else if (fileName.matches(".+_\\d_.+")) {
-                    vpbid = fileName.substring(0, fileName.lastIndexOf("_"));
-                } else {
-                    vpbid = fileName;
-                }
-
-                //判断是否符合videoPoolBitrateId规范
-                if (!PolyvSDKUtil.validateVideoPoolBitrateId(vpbid)) {
-                    continue;
-                }
-
-                //判断是否是没有后缀的文件，是下载视频的临时文件，表示没有下载完整的视频文件。
-                videoInfo = getVideoInfo(vpbid);
-                if (!videoInfo.getVideoId().equals(vid)) {
-                    continue;
-                }
-
-                if (!fileName.contains(".") && !fileName.matches(".+_\\d_.+")) {
-                    File tmpVideo = PolyvVideoUtil.validateTmpVideo(videoInfo.getVideoId(), videoInfo.getBitrate());
-                    if (tmpVideo != null) {
-                        return false;
-                    }
-                }
-
-                //正常有后缀的视频文件
-                if (fileName.endsWith(".m3u8")) {
-                    //1.0 m3u8存储结构vpbid.m3u8
-                    int validateResult = PolyvVideoUtil.validateM3U8Video(videoInfo.getVideoId(), videoInfo.getBitrate());
-                    switch (validateResult) {
-                        case PolyvValidateM3U8VideoReturnType.M3U8_CORRECT:
-                            return true;
-                        case PolyvValidateM3U8VideoReturnType.M3U8_FILE_NOT_FOUND:
-                            break;
-                        case PolyvValidateM3U8VideoReturnType.M3U8_FILE_CONTENT_EMPTY:
-                        case PolyvValidateM3U8VideoReturnType.M3U8_KEY_FILE_NOT_FOUND:
-                        case PolyvValidateM3U8VideoReturnType.M3U8_TS_FILE_NOT_FOUND:
-                        case PolyvValidateM3U8VideoReturnType.M3U8_TS_LIST_EMPTY:
-                            return false;
-                    }
-                } else if (fileName.endsWith(".mp4") || fileName.endsWith("_mp4")) {
-                    File mp4Video = PolyvVideoUtil.validateMP4Video(videoInfo.getVideoId(), videoInfo.getBitrate());
-                    if (mp4Video != null) {
-                        return true;
-                    }
-                } else {
-                    File video = PolyvVideoUtil.validateVideo(videoInfo.getVideoId(), videoInfo.getBitrate());
-                    if (video != null) {
-                        return true;
-                    }
-                }
+            JSONObject result = new JSONObject();
+            JSONObject vidJsonObject = new JSONObject();
+            vidJsonObject.put("downloadStatus", "finished");
+            vidJsonObject.put("downloadPercentage", 100);
+            Log.d(TAG, "DownloadSuccess: " + info.getVid());
+            result.put(info.getVid(), vidJsonObject);
+            if (jsCallback != null) {
+                jsCallback.invokeAndKeepAlive(result);
             }
         }
 
-        return false;
+        @Override
+        public void onDownloadFail(@NonNull PolyvDownloaderErrorReason polyvDownloaderErrorReason) {
+            JSONObject result = new JSONObject();
+            JSONObject vidJsonObject = new JSONObject();
+            Integer progress = videoLastDownloadProgress.get(info.getVid());
+
+            vidJsonObject.put("downloadStatus", "failed");
+            vidJsonObject.put("downloadPercentage", progress != null ? progress : 0);
+            String message = PolyvErrorMessageUtils.getDownloaderErrorMessage(polyvDownloaderErrorReason.getType());
+            message += "(error code " + polyvDownloaderErrorReason.getType().getCode() + ")";
+            vidJsonObject.put("errMsg", message);
+            Log.d(TAG, "DownloadFail: " + message);
+
+            result.put(info.getVid(), vidJsonObject);
+
+            if (jsCallback != null) {
+                jsCallback.invokeAndKeepAlive(result);
+            }
+        }
     }
 
-    private VideoInfoVO getVideoInfo(String vpbid) {
-        String vid = vpbid.substring(0, vpbid.lastIndexOf("_") + 1) + vpbid.substring(0, 1);
-        int bitrate = Integer.parseInt(vpbid.substring(vpbid.length() - 1));
-        return new VideoInfoVO(vid, bitrate);
+    class UniVodDownloadStopListener implements IPolyvDownloaderStopListener {
+
+        JSCallback jsCallback;
+        PolyvDownloadInfo infoVO;
+
+        UniVodDownloadStopListener(JSCallback callback, PolyvDownloadInfo downloadInfo) {
+            jsCallback = callback;
+            infoVO = downloadInfo;
+        }
+
+        @Override
+        public void onStop() {
+            PolyvCommonLog.d(TAG, "onDownloadStop");
+            Integer progress = videoLastDownloadProgress.get(infoVO.getVid());
+            JSONObject result = new JSONObject();
+            JSONObject vidJsonObject = new JSONObject();
+            vidJsonObject.put("downloadStatus", "stopped");
+            vidJsonObject.put("downloadPercentage", progress != null ? progress : 0);
+            result.put(infoVO.getVid(), vidJsonObject);
+            if (jsCallback != null) {
+                jsCallback.invokeAndKeepAlive(result);
+            }
+        }
     }
 
 }

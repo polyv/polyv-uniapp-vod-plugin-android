@@ -1,7 +1,7 @@
 apply plugin: 'com.android.application'
 
 android {
-    compileSdkVersion 28
+    compileSdkVersion 29
     buildToolsVersion '28.0.3'
     defaultConfig {
         applicationId "uni.UNI5330E6B"
@@ -21,14 +21,11 @@ android {
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }
         debug{
-            android.applicationVariants.all { variant ->
+            android.applicationVariants.all {
+                variant ->
                     variant.outputs.all {
-                        if(variant.buildType.name == 'debug') {
-                            outputFileName = "android_debug.apk"
-                        } else if(variant.buildType.name == 'release'){
-                            //在这里修改apk文件名，引号内的字符串都可以随便定义
-                            outputFileName = "uniapp_rc"+defaultConfig.versionName+".apk"
-                        }
+                        //在这里修改apk文件名，引号内的字符串都可以随便定义
+                        outputFileName = "android_debug.apk"
                     }
             }
         }
@@ -42,15 +39,6 @@ android {
         ignoreAssetsPattern "!.svn:!.git:.*:!CVS:!thumbs.db:!picasa.ini:!*.scc:*~"
     }
     /*代码结束*/
-
-    android {
-        lintOptions {
-            checkReleaseBuilds false
-            // Or, if you prefer, you can continue to check for errors in release builds,
-            // but continue the build even when errors are found:
-            abortOnError false
-        }
-    }
 }
 repositories {
     flatDir {
@@ -83,5 +71,6 @@ dependencies {
     implementation project(':uniplugin_plvvod')
     //使用模块下的依赖包，不应当直接在模块中使用，否则会把jar等依赖包打到aar里面，增加开发者处理依赖冲突难度
     implementation fileTree(dir: '../uniplugin_plvvod/libs', include: ['*.jar','*.aar'])
+    implementation 'com.google.code.gson:gson:2.8.5'
 
 }
