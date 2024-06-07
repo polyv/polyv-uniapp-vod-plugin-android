@@ -1,4 +1,4 @@
-
+⚠️ **本仓库已废弃，请前往新仓库：[polyv-uniapp-vod-plugin](https://github.com/polyv/polyv-uniapp-vod-plugin)**
 
 本项目是针对保利威云点播的uni-app客户提供的打包工程，用于打包 uni-app 项目（包含云点播插件）的自定义基座，也可用于打正式包。使用该项目进行离线打包，可使你免受 uni-app 云打包的限制。支持在该工程的基础上添加其他uni-app插件。
 
